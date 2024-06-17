@@ -1,0 +1,32 @@
+{    "$schema": "http://json.schemastore.org/tsconfig",
+    "type": "object",
+    "properties": {
+      "compilerOptions": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string" },
+          "module": { "type": "string" },
+          "strict": { "type": "boolean" },
+          "esModuleInterop": { "type": "boolean" },
+          "skipLibCheck": { "type": "boolean" },
+          "forceConsistentCasingInFileNames": { "type": "boolean" },
+          "outDir": { "type": "string" }
+        },
+        "required": [
+          "target",
+          "module",
+          "strict",
+          "esModuleInterop",
+          "skipLibCheck",
+          "forceConsistentCasingInFileNames",
+          "outDir"
+        ]
+      },
+      "include": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "required": ["compilerOptions", "include"]
+  }
+  
