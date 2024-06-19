@@ -1,121 +1,138 @@
 import { Request, Response } from 'express';
-import express from "express";
-import bcrypt from 'bcryptjs';
-import db from '../db';
+import { User } from '../models/user';
+import { Transaction } from '../models/transaction';
 import axios from 'axios';
-import dotenv from 'dotenv';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import db from '../db'; 
 
-dotenv.config();
 
-const app = express();
-const API_URL = "https://adjutor.lendsqr.com/v2/";
-
-const getHeaders = (accessToken: string) => ({
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${accessToken}`
-});
-
-export const registerUser = async (req: Request, res: Response): Promise<void> => {
-  console.log('Request body:', req.body); // Logging the request body to check its content
-  const { name, email, phone_number, password } = req.body;
+export const registerUser = async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
 
   try {
-    if (!name || !email || !phone_number || !password) {
-      console.error('Missing fields:', { name, email, phone_number, password });
-      res.status(400).json({ error: 'All fields are required' });
-      return;
+    // Construct the URL with the actual email address
+    const karmaUrl = `${'https://adjutor.lendsqr.com/v2/verification/karma'}/${encodeURIComponent(email)}`;
+
+    // Checking Karma
+    const { data: karmaData } = await axios.get(karmaUrl, {
+      headers: {
+        'Authorization': `Bearer sk_live_2D1YDWaeySERRKaWb9hiRxzzazp1drbE3eWOuF9C`
+      }
+    });
+
+    console.log('Karma response:', karmaData);
+
+    // If Karma indicates user is blacklisted or any other issue
+    if (karmaData.status === 'success') {
+      return res.status(403).json({ message: 'User is blacklisted in Karma' });
     }
 
-    const existingUser = await db('users').where({ email }).first();
-    if (existingUser) {
-      res.status(400).json({ error: 'User already exists' });
-      return;
-    }
-
+    // Proceed with registration if user not found in Karma
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = await db('users').insert({
-      name,
-      email,
-      phone_number,
-      password: hashedPassword
-    });
-
-    const accessToken = process.env.ACCESS_TOKEN as string;
-    const response = await axios.post(API_URL + 'register', {
-      name,
-      email,
-      phone_number,
-      password
-    }, {
-      headers: getHeaders(accessToken)
-    });
-
-
- // Simulate API response due to network issue
- // const apiResponse = { status: 'success', message: 'Simulated API response' }   
-
-
-    res.status(201).json({ user: newUser, apiResponse: response.data });
-  } catch (error: any) {
-    console.error('Error registering user:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to register user' });
+    await db('users').insert({ name, email, password: hashedPassword });
+    res.status(201).json({ message: 'User created successfully' });
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ message: 'Server error', error });
   }
 };
 
 
 
-export const loginUser = async (req: Request, res: Response): Promise<void> => {
-  const { email, password } = req.body;
 
+export const loginUser = async (req: Request, res: Response) => {
   try {
+    const { email, password } = req.body;
+
+    // Log the request body
+    console.log('loginUser request body:', req.body);
+
     const user = await db('users').where({ email }).first();
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      res.status(400).json({ error: 'Invalid email or password' });
-      return;
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    const accessToken = process.env.ACCESS_TOKEN as string;
-    const response = await axios.post(API_URL + 'login', { email, password }, {
-      headers: getHeaders(accessToken)
-    });
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
 
-    res.status(200).json({ user, apiResponse: response.data });
-  } catch (error: any) {
-    console.error('Error logging in user:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to login user' });
+    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+    res.json({ message: 'Login successful', token });
+  } catch (error) {
+    console.error('Error logging in user:', error);
+    res.status(500).json({ message: 'Server error', error });
   }
 };
 
 
-export const transferFunds = async (req: Request, res: Response): Promise<void> => {
-  const { fromAccount, toAccount, amount } = req.body;
 
-  try {
-    const accessToken = process.env.ACCESS_TOKEN as string;
-    const response = await axios.post(API_URL + 'transfer', { fromAccount, toAccount, amount }, {
-      headers: getHeaders(accessToken)
-    });
+export async function fundAccount(req: Request, res: Response) {
+    const { userId, amount } = req.body;
 
-    res.status(200).json(response.data);
-  } catch (error: any) {
-    console.error('Error transferring funds:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to transfer funds' });
-  }
-};
+    try {
+        const user = await User.findUserById(req.app.get('db'), userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
 
+        const newBalance = user.balance + amount;
+        await User.updateUserBalance(req.app.get('db'), userId, newBalance);
+        
+        await Transaction.createTransaction(req.app.get('db'), { userId, type: 'fund', amount });
+        res.status(200).json({ message: 'Account funded successfully', newBalance });
+    } catch (error) {
+        res.status(500).json({ message: 'Error funding account', error });
+    }
+}
 
-export const withdrawFunds = async (req: Request, res: Response): Promise<void> => {
-  const { accountId, amount } = req.body;
+export async function transferFunds(req: Request, res: Response) {
+    const { fromUserId, toUserId, amount } = req.body;
 
-  try {
-    const accessToken = process.env.ACCESS_TOKEN as string;
-    const response = await axios.post(API_URL + 'withdraw', { accountId, amount }, {
-      headers: getHeaders(accessToken)
-    });
+    try {
+        const fromUser = await User.findUserById(req.app.get('db'), fromUserId);
+        const toUser = await User.findUserById(req.app.get('db'), toUserId);
+        
+        if (!fromUser || !toUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        
+        if (fromUser.balance < amount) {
+            return res.status(400).json({ message: 'Insufficient funds' });
+        }
+        
+        await User.updateUserBalance(req.app.get('db'), fromUserId, fromUser.balance - amount);
+        await User.updateUserBalance(req.app.get('db'), toUserId, toUser.balance + amount);
+        
+        await Transaction.createTransaction(req.app.get('db'), { userId: fromUserId, type: 'transfer', amount: -amount });
+        await Transaction.createTransaction(req.app.get('db'), { userId: toUserId, type: 'transfer', amount });
+        
+        res.status(200).json({ message: 'Transfer successful' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error transferring funds', error });
+    }
+}
 
-    res.status(200).json(response.data);
-  } catch (error: any) {
-    console.error('Error withdrawing funds:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to withdraw funds' });
-  }
-};
+export async function withdrawFunds(req: Request, res: Response) {
+    const { userId, amount } = req.body;
+
+    try {
+        const user = await User.findUserById(req.app.get('db'), userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        
+        if (user.balance < amount) {
+            return res.status(400).json({ message: 'Insufficient funds' });
+        }
+        
+        const newBalance = user.balance - amount;
+        await User.updateUserBalance(req.app.get('db'), userId, newBalance);
+        
+        await Transaction.createTransaction(req.app.get('db'), { userId, type: 'withdraw', amount });
+        res.status(200).json({ message: 'Withdrawal successful', newBalance });
+    } catch (error) {
+        res.status(500).json({ message: 'Error withdrawing funds', error });
+    }
+}

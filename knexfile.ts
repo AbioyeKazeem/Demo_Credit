@@ -1,20 +1,41 @@
-import dotenv from 'dotenv';
 import { Knex } from 'knex';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
-const config: Knex.Config = {
-  client: 'mysql',
-  connection: {
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+const config: { [key: string]: Knex.Config } = {
+  development: {
+    client: 'mysql2',
+    connection: {
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      charset: 'utf8mb4'
+    },
+    migrations: {
+      directory: './src/migrations'
+    },
+    seeds: {
+      directory: './src/seeds'
+    }
   },
-  migrations: {
-    directory: './migrations',
-  },
-  useNullAsDefault: true,
+  production: {
+    client: 'mysql2',
+    connection: {
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      charset: 'utf8mb4'
+    },
+    migrations: {
+      directory: './src/migrations'
+    },
+    seeds: {
+      directory: './src/seeds'
+    }
+  }
 };
 
 export default config;
