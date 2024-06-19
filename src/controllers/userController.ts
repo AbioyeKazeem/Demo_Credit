@@ -5,26 +5,30 @@ import axios from 'axios';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import db from '../db'; 
+import dotenv from 'dotenv';
 
+
+dotenv.config();
 
 export const registerUser = async (req: Request, res: Response) => {
   const { name, email, password } = req.body;
+  const accessToken = process.env.ACCESS_TOKEN; // Retrieve ACCESS_TOKEN from environment variables
 
   try {
     // Construct the URL with the actual email address
-    const karmaUrl = `${'https://adjutor.lendsqr.com/v2/verification/karma'}/${encodeURIComponent(email)}`;
+    const karmaUrl = `https://adjutor.lendsqr.com/v2/verification/karma/${encodeURIComponent(email)}`;
 
     // Checking Karma
     const { data: karmaData } = await axios.get(karmaUrl, {
       headers: {
-        'Authorization': `Bearer sk_live_2D1YDWaeySERRKaWb9hiRxzzazp1drbE3eWOuF9C`
+        'Authorization': `Bearer ${accessToken}`
       }
     });
 
     console.log('Karma response:', karmaData);
 
     // If Karma indicates user is blacklisted or any other issue
-    if (karmaData.status === 'success') {
+    if (karmaData.status === 'blacklisted') {
       return res.status(403).json({ message: 'User is blacklisted in Karma' });
     }
 
